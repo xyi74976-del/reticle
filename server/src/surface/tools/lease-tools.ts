@@ -41,7 +41,7 @@ import {
   scrubKnownSecrets,
   type SeedStorage,
 } from '@reticlehq/core';
-import { ReticleTool, SESSION_HEALTH } from '@reticlehq/core';
+import { ReticleTool } from '@reticlehq/core';
 import type { ToolDef, ToolDeps } from './tool-kit.js';
 import { asString } from '@reticlehq/core';
 import { chromiumHint } from '@/command/cli/doctor/browser/chromium-hint.js';
@@ -201,11 +201,6 @@ export function scrubSeedFromError(text: string, seed?: unknown): string {
     }
   }
   return out;
-}
-
-/** True for a Playwright `storageState()` export (`{ origins: [...] }`), not our seed shape. */
-function looksLikeStorageStateExport(seed: unknown): boolean {
-  return Array.isArray((seed as { origins?: unknown } | null)?.origins);
 }
 
 /**
@@ -430,7 +425,7 @@ export async function acquireLeasedSession(
      * implement it; the real pool always does.
      */
     dialFailureUrl?: (sessionId: string) => string | undefined;
-    /** Optional so a test double need not implement; the real pool always does. */
+    /** Optional so a test double need not implement it; the real pool always does. */
     alias?: (registeredId: string, leaseId: string) => void;
   },
   sessions: { get: (id: string) => unknown; all: () => { id: string; url?: string }[] },
@@ -458,7 +453,7 @@ export async function acquireLeasedSession(
     registeredId = resolveLeasedSessionId(sessions, lease.sessionId);
     return registeredId !== undefined;
   });
-  if (registeredId !== undefined) pool.alias?.(registeredId, lease.leaseId ?? lease.sessionId);
+  if (registeredId !== undefined) pool.alias?.(registeredId, lease.sessionId);
   const effectiveId = registeredId ?? lease.sessionId;
   if (seedStorage !== undefined) {
     const session = sessions.get(effectiveId) as
@@ -571,7 +566,7 @@ export const LEASE_ACQUIRE_TOOL: ToolDef = {
     expiresInMs: z
       .number()
       .describe(
-        'Milliseconds until the lease expires if untouched. Each tool call that targets this session resets the clock. Plan your work to finish or re-acquire before this runs out.',
+        'Milliseconds until this lease expires if untouched. Each tool call that targets this session resets the clock. Plan your work to finish or re-acquire before this runs out.',
       ),
     leased: z.number().describe('How many contexts are currently leased from the pool.'),
     queued: z.number().describe('How many acquires are waiting for a free slot.'),
@@ -605,7 +600,7 @@ export const LEASE_ACQUIRE_TOOL: ToolDef = {
       throw new Error('reticle_lease{action:"acquire"} requires a url');
     // Preflight the browser before spending the round trip. Without it a missing Playwright Chromium
     // only surfaces inside pool.acquire, where the launch failure is caught and reported as
-    // "could not open <url> — is the app running?" — sending the caller to debug an app that is
+    // "could not open <url> — is the app running?" — sending the caller to debug an app that
     // fine. Say the real thing at the first refusal instead. The phrasing carries "Chromium is not
     // installed" so error-recovery routes it to the NO_POOL fix (install + drive a human tab).
     if (deps.browserProbe !== undefined) {
@@ -620,16 +615,11 @@ export const LEASE_ACQUIRE_TOOL: ToolDef = {
     if (seedStorageArg !== undefined) {
       const parsed = SeedStorageSchema.safeParse(seedStorageArg);
       if (!parsed.success) {
-        const msg = scrubSeedFromError(
-          parsed.error.issues
-            .map((i) => (i.path.length > 0 ? `${i.path.join('.')}: ${i.message}` : i.message))
-            .join(', '),
+        const issuesMsg = scrubSeedFromError(
+          parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join(', '),
           seedStorageArg,
         );
-        const hint = looksLikeStorageStateExport(seedStorageArg)
-          ? 'This looks like a Playwright storageState() export ({ origins, cookies }); seedStorage takes { local?, session?, cookies? } (map origins[].localStorage into `local`).'
-          : 'Expected { local?, session?, cookies? }.';
-        throw new Error(`reticle_lease{action:"acquire"} seedStorage is invalid: ${msg}. ${hint}`);
+        throw new Error(`reticle_lease{action:"acquire"} seedStorage is invalid: ${issuesMsg}`);
       }
       validatedSeed = parsed.data;
     }
@@ -671,10 +661,10 @@ export const LEASE_ACQUIRE_TOOL: ToolDef = {
           // touch and release arrives under the id being handed back here.
           pool.alias(resolved, existing);
           pool.touch(existing);
-          // Probed only HERE, never on the mint path. There, the readiness wait resolved
+          // Probed only HERE, never on the mint path below. There, the readiness wait resolved
           // moments ago and IS the liveness evidence; on reuse the last evidence may be minutes
-          // old, or there may be none at all — `unresponsive` is set by past commands failing,
-          // and its own contract says absence means "answering, OR NOT ASKED YET". So the happy path of
+          // old, or there may be none at all — `unresponsive` is set by past commands failing, and
+          // its own contract says absence means "answering, OR NOT ASKED YET". So the happy path of
           // a first acquire pays nothing for this.
           const alive = await probeLeaseAlive(deps.sessions.get(resolved));
           return {
@@ -744,18 +734,18 @@ export const LEASE_ACQUIRE_TOOL: ToolDef = {
       // The lease now exists, so any HUD a human is watching has just gone dark. Say so.
       tellWatchers(deps, projectId, AGENT_DRIVING_ELSEWHERE);
       // ready means the SDK dialled in — not that contracts match. Carry the skew warning on acquire
-      // so the agent does not learn it only after the CDP tool invents a closed page (#688).
+      // so the agent does not learn it only after a CDP tool invents a closed page (#688).
       const versionSkew =
         registeredId === undefined ? undefined : deps.sessions.get(registeredId)?.versionSkew;
       return {
         sessionId: registeredId ?? lease.sessionId,
         url,
         ready,
-        // The other half of the pair. `ready: false` carried two opposite
+        // The other half of the pair. `ready: false` carried two opposite situations under one
         // word: no SDK ever dialled in (look at the install) versus one dialled in and stopped
         // answering (recover the tab). They want different next actions, so they get names.
         ...(ready ? {} : { notReadyReason: LeaseNotReadyReason.SDK_NEVER_DIALLED }),
-        ...(zeroInstall ? { zeroInstall: true }),
+        ...(zeroInstall ? { zeroInstall: true } : {}),
         expiresInMs: pool.leaseTtlMs(),
         leased: pool.activeCount(),
         queued: pool.queuedCount(),
@@ -845,7 +835,9 @@ const PREFER_EXISTING_NOTE =
  * is the right trade for a broadcast and the wrong one here, where a single `[0]` is handed back as
  * "drive this instead". With `projectId` undefined — and it is an OPTIONAL argument that an
  * acquiring agent has no reason to pass — every non-leased session qualified and the answer was
- * whichever the map yielded first: leasing `localhost:4312` recommended a tab on `:5173`, another app.
+ * whichever the map yielded first. Measured against a real daemon: leasing `localhost:4312`
+ * recommended a Phanpy tab on `:5173`, so an agent that complied would have driven a different
+ * application and reported a verdict about it.
  *
  * So this narrows by the one thing a lease always knows: the ORIGIN it is being taken against.
  * `projectId` still narrows further when given. Nothing is recommended when nothing matches, which
@@ -864,8 +856,6 @@ function liveTabFor(
     const candidates = deps.sessions
       .all()
       .filter((session) => session.url !== undefined && originOf(session.url) === wanted)
-      // Nor a tab gone silent: one last heard from 105s earlier was named here and answered nothing.
-      .filter((session) => (session.lastSeenMs?.() ?? 0) <= SESSION_HEALTH.STALE_THRESHOLD_MS)
       .map((session) => ({ id: session.id, projectId: session.projectId }));
     return watchersToNotify(candidates, pool.leasedSessionIds(), projectId)[0];
   } catch {
@@ -901,7 +891,7 @@ export const LEASE_TOOLS: ToolDef[] = [LEASE_ACQUIRE_TOOL, LEASE_RELEASE_TOOL];
 /**
  * The state a suite should boot its flows from: whatever the agent is already sitting in.
  *
- * The join the fixture work was building toward. A suite's flows each start from cold, so
+ * This is the join the fixture work was building toward. A suite's flows each start from cold, so
  * fifty of them prove the login works fifty times — and the flow that LOGS OUT leaves every flow
  * after it signed out, which no navigation repairs, because the problem is not where the subject is
  * but what it holds. A seed is applied to an isolated context BEFORE the first navigation, which is
@@ -951,7 +941,7 @@ export async function sessionPerturbationPort(
     slow: async (rules) => {
       await setMocks(appUrl, [...rules]);
     },
-    /** Clearing the undo. A page left slowed is damage the next run inherits. */
+    /** Clearing is the undo. A page left slowed is damage the next run inherits. */
     clear: async () => {
       await setMocks(appUrl, []);
     },
@@ -964,7 +954,7 @@ export async function sessionPerturbationPort(
  * The same job as `suiteFixtureSeed` next door, stopping one step earlier: that one captures and
  * converts, this hands back the PORT so a caller can re-apply what it captured later. It lives here
  * for the reason written above — a feature reaching into the input layer directly is a feature
- * depending on a driver, and the boundary guard asks about it.
+ * depending on a driver, and the boundary guard asks about it. It asked.
  */
 export async function suiteFixturePort(
   realInput: RealInputProvider | undefined,
@@ -974,7 +964,6 @@ export async function suiteFixturePort(
   try {
     return await fixturePortFor(realInput, appUrl);
   } catch {
-    // A provider that cannot answer is the same answer as a provider that cannot break.
     return undefined;
   }
 }
@@ -983,7 +972,7 @@ export async function suiteFixturePort(
  * A way to break this session's page, or nothing.
  *
  * Sits beside `suiteFixtureSeed` because it is the same shape of job: turning a provider capability
- * into something the feature can use, on the one side of the graph that is allowed to know about both.
+ * into something a feature can use, on the one side of the graph that is allowed to know about both.
  * A flow tool reaching into the input layer directly would be a feature depending on a driver, which
  * is the reach the boundary guard exists to ask about.
  */
