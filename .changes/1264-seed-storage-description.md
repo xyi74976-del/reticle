@@ -1,0 +1,3 @@
+### Fixed
+
+- **`@reticlehq/server`: the `reticle_lease{action:"acquire"}` `seedStorage` description named keys the schema rejects.** The tool description read `(localStorage, sessionStorage, cookies)`, so an agent that copied it sent `{ localStorage: ... }`; the strict schema rejects that key, seeding did not happen, and the call errored. The description now names the accepted shape `{ local?, session?, cookies? }` — `local`/`session` are name-value records and `cookies` is a name-value record or an array of cookie objects — with a worked example, and a unit test pins the wording. Closes [#1264](https://github.com/reticlehq/reticle/issues/1264).
