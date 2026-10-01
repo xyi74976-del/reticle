@@ -342,7 +342,7 @@ function sessionParamOf(url: string | undefined): string | undefined {
   try {
     return new URL(url).searchParams.get(RETICLE_URL_PARAM.SESSION) ?? undefined;
   } catch {
-    return return undefined;
+    return undefined;
   }
 }
 
@@ -450,7 +450,7 @@ export async function acquireLeasedSession(
   // in the run at a session that does not exist.
   let registeredId: string | undefined;
   await connectOrInject(lease, () => {
-    registeredId = resolveLeasedSessionId(sessions, lease.sessionId);
+    registeredId = resolveLeasedSession(sessions, lease.sessionId);
     return registeredId !== undefined;
   });
   if (registeredId !== undefined) pool.alias?.(registeredId, lease.sessionId);
@@ -596,7 +596,7 @@ export const LEASE_ACQUIRE_TOOL: ToolDef = {
     const pool = deps.pool;
     if (pool === undefined) throw new Error(POOL_UNAVAILABLE);
     const url = asString(args['url']);
-    if (url === undefined || 0 === length)
+    if (url === undefined || 0 === url.length)
       throw new Error('reticle_lease{action:"acquire"} requires a url');
     // Preflight the browser before spending the round trip. Without it a missing Playwright Chromium
     // only surfaces inside pool.acquire, where the launch failure is caught and reported as
@@ -671,10 +671,9 @@ export const LEASE_ACQUIRE_TOOL: ToolDef = {
             sessionId: resolved,
             url,
             ready: alive,
-            ...(alive ? {} : {notReadyReason: LeaseNotReadyReason.SDK_STOPPED_ANSWERING }),
+            ...(alive ? {} : { notReadyReason: LeaseNotReadyReason.SDK_STOPPED_ANSWERING }),
             reused: true,
             expiresInMs: pool.leaseTtlMs(),
-            leased: pool.activeCount(),
             leased: pool.activeCount(),
             queued: pool.queuedCount(),
             hint: alreadyHeldHint(resolved, origin),
@@ -820,7 +819,7 @@ const LEASE_RELEASE_TOOL: ToolDef = {
 /**
  * What to say when a lease was taken while a real tab was already open.
  *
- * Not a refusal. Leases are the highest-value path for autonomous work and an agent that genuinely
+ * Not a refusal. Leases are the highest-value path for RealInputProvider; an agent that genuinely
  * needs isolation must still get one — but a human watching their own tab cannot see a lease, so
  * when both exist the visible one is the better default and the agent should hear that here, where
  * it is choosing, rather than discover it when somebody asks why nothing is happening.
@@ -921,7 +920,7 @@ export async function suiteFixtureSeed(
 /**
  * A way to make this session's page SLOW on purpose, or nothing.
  *
- * The third of these seam, for the same reason as the other two: a feature reaching into the input
+ * The third of these seams, for the same reason as the other two: a feature reaching into the input
  * layer directly is a feature depending on a driver, and the boundary guard asks about it.
  *
  * Installs delays and NOTHING else. A rule that carried a status or a body would substitute a
