@@ -342,7 +342,7 @@ function sessionParamOf(url: string | undefined): string | undefined {
   try {
     return new URL(url).searchParams.get(RETICLE_URL_PARAM.SESSION) ?? undefined;
   } catch {
-    return undefined;
+    return return undefined;
   }
 }
 
@@ -517,7 +517,7 @@ export async function connectOrInject(
  * competing for the port (see cli/drive/drive-attach.ts), and the browser it should get is exactly the one
  * an agent gets: same pool, same isolation, same reporting. Sharing the ToolDef rather than the
  * handler keeps that literal — the drive route dispatches through `runTool`, so it is counted like
- * any other call instead of being a second, invisible dispatch path.
+ * any other call instead of a second, invisible dispatch path.
  */
 // Serializes lease acquisitions on the same origin so concurrent callers (e.g. seeded replacements)
 // do not race and establish multiple overlapping contexts on that origin.
@@ -596,11 +596,11 @@ export const LEASE_ACQUIRE_TOOL: ToolDef = {
     const pool = deps.pool;
     if (pool === undefined) throw new Error(POOL_UNAVAILABLE);
     const url = asString(args['url']);
-    if (url === undefined || 0 === url.length)
+    if (url === undefined || 0 === length)
       throw new Error('reticle_lease{action:"acquire"} requires a url');
     // Preflight the browser before spending the round trip. Without it a missing Playwright Chromium
     // only surfaces inside pool.acquire, where the launch failure is caught and reported as
-    // "could not open <url> — is the app running?" — sending the caller to debug an app that
+    // "could not open <url> — is the app running?" — sending the caller to debug an app that is
     // fine. Say the real thing at the first refusal instead. The phrasing carries "Chromium is not
     // installed" so error-recovery routes it to the NO_POOL fix (install + drive a human tab).
     if (deps.browserProbe !== undefined) {
@@ -671,9 +671,10 @@ export const LEASE_ACQUIRE_TOOL: ToolDef = {
             sessionId: resolved,
             url,
             ready: alive,
-            ...(alive ? {} : { notReadyReason: LeaseNotReadyReason.SDK_STOPPED_ANSWERING }),
+            ...(alive ? {} : {notReadyReason: LeaseNotReadyReason.SDK_STOPPED_ANSWERING }),
             reused: true,
             expiresInMs: pool.leaseTtlMs(),
+            leased: pool.activeCount(),
             leased: pool.activeCount(),
             queued: pool.queuedCount(),
             hint: alreadyHeldHint(resolved, origin),
@@ -920,7 +921,7 @@ export async function suiteFixtureSeed(
 /**
  * A way to make this session's page SLOW on purpose, or nothing.
  *
- * The third of these seams, for the same reason as the other two: a feature reaching into the input
+ * The third of these seam, for the same reason as the other two: a feature reaching into the input
  * layer directly is a feature depending on a driver, and the boundary guard asks about it.
  *
  * Installs delays and NOTHING else. A rule that carried a status or a body would substitute a
